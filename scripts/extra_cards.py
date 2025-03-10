@@ -1,5 +1,6 @@
-﻿from modules.ui_extra_networks import ExtraNetworksPage, quote_js, register_page
-from modules import shared, script_callbacks
+from modules.ui_extra_networks import ExtraNetworksPage, quote_js, register_page
+from modules import util, shared, script_callbacks
+from typing import Optional, Union
 import modules.scripts as scripts 
 
 from scripts.misc_utils import (
@@ -36,12 +37,30 @@ def setting_action_collect_stray_prv():
     collect_stray_previews(wild_paths)
     print("[task complete]---collect stray previews---")
 
-class WildcardsCards(ExtraNetworksPage):
 
+class WildcardsCards:
     def __init__(self):
-        super().__init__(extra_network_name)
-        self.allow_negative_prompt = True
-        self.cards: list[str] = None
+        self.instance = ExtraNetworksPage(extra_network_name)
+        self.title = extra_network_name
+        self.name = extra_network_name.lower()
+        # This is the actual name of the extra networks tab (not txt2img/img2img).
+        self.extra_networks_tabname = self.name.replace(" ", "_")
+        self.allow_prompt = True
+        self.allow_negative_prompt = False
+        self.metadata = {}
+        self.items = {}
+        self.lister = util.MassFileLister()
+        # HTML Templates
+        self.pane_tpl = shared.html("extra-networks-pane.html")
+        self.pane_content_tree_tpl = shared.html("extra-networks-pane-tree.html")
+        self.pane_content_dirs_tpl = shared.html("extra-networks-pane-dirs.html")
+        self.card_tpl = shared.html("extra-networks-card.html")
+        self.btn_tree_tpl = shared.html("extra-networks-tree-button.html")
+        self.btn_copy_path_tpl = shared.html("extra-networks-copy-path-button.html")
+        self.btn_metadata_tpl = shared.html("extra-networks-metadata-button.html")
+        self.btn_edit_item_tpl = shared.html("extra-networks-edit-item-button.html")
+        self.instance.allow_negative_prompt = True
+        self.instance.cards: list[str] = None
 
         if not os.path.exists(CARDS_FOLDER):
             print(f'\n[{addon_name}] "cards" folder not found. Initializing...\n')
@@ -50,9 +69,9 @@ class WildcardsCards(ExtraNetworksPage):
         self.refresh()
 
     def refresh(self):
-        self.cards = []
+        self.instance.cards = []
         wild_paths = collect_Wildcards(WILDCARDS_FOLDER)
-        self.cards = wild_paths
+        self.instance.cards = wild_paths
         clean_residue(CARDS_FOLDER, wild_paths)
 
 
@@ -67,15 +86,15 @@ class WildcardsCards(ExtraNetworksPage):
         #else:
         #    category, name = '', wild_path
 
-        name , category = get_safe_name_2(wild_path, self.cards)
+        name , category = get_safe_name_2(wild_path, self.instance.cards)
 
         return {
             "name": name,
             "filename": filePath,
             "shorthash": f"{hash(filePath)}",
-            "preview": self.find_preview(path+"."+suffix) if self.find_preview(path+"."+suffix) else self.find_preview(path),
-            "description": self.find_description(path),
-            "search_terms": [self.search_terms_from_path(filePath)],
+            "preview": self.instance.find_preview(path+"."+suffix) if self.instance.find_preview(path+"."+suffix) else self.instance.find_preview(path),
+            "description": self.instance.find_description(path),
+            "search_terms": [self.instance.search_terms_from_path(filePath)],
             "prompt": quote_js(prompt),
             "local_preview": f"{path}.{suffix}.{shared.opts.samples_format}",
             "sort_keys": {
@@ -89,12 +108,94 @@ class WildcardsCards(ExtraNetworksPage):
     def list_items(self):
         i = 0
 
-        for FILE in self.cards:
+        for FILE in self.instance.cards:
             i += 1
             yield self.create_item(FILE, i)
 
     def allowed_directories_for_previews(self):
         return [CARDS_FOLDER]
+        
+    def read_user_metadata(self, item, use_cache=True):
+        self.instance.read_user_metadata(item, use_cache)
+    
+    def link_preview(self, filename):
+        return self.instance.link_preview(filename)
+    
+    def search_terms_from_path(self, filename, possible_directories=None):
+        return self.instance.search_terms_from_path(filename, possible_directories)
+    
+    def create_item_html(self, tabname: str, item: dict, template: Optional[str] = None) -> Union[str, dict]:
+        return self.instance.create_item_html(tabname, item, template)
+        
+    def create_tree_dir_item_html(self, tabname: str, dir_path: str, content: Optional[str] = None) -> Optional[str]:
+        return self.instance.create_tree_dir_item_html(tabname, dir_path, content)
+    
+    def create_tree_file_item_html(self, tabname: str, file_path: str, item: dict) -> str:
+        return self.instance.create_tree_file_item_html(tabname, file_path, item)
+    
+    def create_tree_view_html(self, tabname: str) -> str:
+        return self.instance.create_tree_view_html(tabname)
+    
+    def create_dirs_view_html(self, tabname: str) -> str:
+        return self.instance.create_dirs_view_html(tabname)
+    
+    def create_card_view_html(self, tabname: str, *, none_message) -> str:
+        none_messageSelf = none_message
+        return self.instance.create_card_view_html(tabname, none_message=none_messageSelf)
+    
+    def create_html(self, tabname, *, empty=False):
+        self.instance.lister.reset()
+        self.instance.metadata = {}
+
+        items_list = [] if empty else self.list_items()
+        self.instance.items = {x["name"]: x for x in items_list}
+
+        # Populate the instance metadata for each item.
+        for item in self.instance.items.values():
+            metadata = item.get("metadata")
+            if metadata:
+                self.instance.metadata[item["name"]] = metadata
+
+            if "user_metadata" not in item:
+                self.instance.read_user_metadata(item)
+
+        show_tree = shared.opts.extra_networks_tree_view_default_enabled
+
+        page_params = {
+            "tabname": tabname,
+            "extra_networks_tabname": self.instance.extra_networks_tabname,
+            "data_sortdir": shared.opts.extra_networks_card_order,
+            "sort_path_active": ' extra-network-control--enabled' if shared.opts.extra_networks_card_order_field == 'Path' else '',
+            "sort_name_active": ' extra-network-control--enabled' if shared.opts.extra_networks_card_order_field == 'Name' else '',
+            "sort_date_created_active": ' extra-network-control--enabled' if shared.opts.extra_networks_card_order_field == 'Date Created' else '',
+            "sort_date_modified_active": ' extra-network-control--enabled' if shared.opts.extra_networks_card_order_field == 'Date Modified' else '',
+            "tree_view_btn_extra_class": "extra-network-control--enabled" if show_tree else "",
+            "items_html": self.instance.create_card_view_html(tabname, none_message="Loading..." if empty else None),
+            "extra_networks_tree_view_default_width": shared.opts.extra_networks_tree_view_default_width,
+            "tree_view_div_default_display_class": "" if show_tree else "extra-network-dirs-hidden",
+        }
+
+        if shared.opts.extra_networks_tree_view_style == "Tree":
+            pane_content = self.instance.pane_content_tree_tpl.format(**page_params, tree_html=self.instance.create_tree_view_html(tabname))
+        else:
+            pane_content = self.instance.pane_content_dirs_tpl.format(**page_params, dirs_html=self.instance.create_dirs_view_html(tabname))
+
+        return self.instance.pane_tpl.format(**page_params, pane_content=pane_content)
+    
+    def get_sort_keys(self, path):
+        return self.instance.get_sort_keys(path)
+    
+    def find_preview(self, path):
+        return self.instance.find_preview(path)
+    
+    def find_embedded_preview(self, path, name, metadata):
+        return self.instance.find_embedded_preview(path, name, metadata)
+    
+    def find_description(self, path):
+        return self.instance.find_description(path)
+    
+    def create_user_metadata_editor(self, ui, tabname):
+        return self.instance.create_user_metadata_editor(ui, tabname)
 
 #-------------------------|Settings_page Block_Start|--------------------------
 def on_ui_settings():
