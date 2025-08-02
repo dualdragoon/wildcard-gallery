@@ -1,4 +1,4 @@
-from modules.ui_extra_networks import ExtraNetworksPage, quote_js, register_page
+﻿from modules.ui_extra_networks import ExtraNetworksPage, quote_js, register_page
 from modules import util, shared, script_callbacks
 from typing import Optional, Union
 import modules.scripts as scripts 
@@ -94,7 +94,7 @@ class WildcardsCards:
             "shorthash": f"{hash(filePath)}",
             "preview": self.instance.find_preview(path+"."+suffix) if self.instance.find_preview(path+"."+suffix) else self.instance.find_preview(path),
             "description": self.instance.find_description(path),
-            "search_terms": [self.instance.search_terms_from_path(filePath)],
+            "search_terms": [self.search_terms_from_path(filePath)],
             "prompt": quote_js(prompt),
             "local_preview": f"{path}.{suffix}.{shared.opts.samples_format}",
             "sort_keys": {
@@ -122,7 +122,13 @@ class WildcardsCards:
         return self.instance.link_preview(filename)
     
     def search_terms_from_path(self, filename, possible_directories=None):
-        return self.instance.search_terms_from_path(filename, possible_directories)
+        abspath = os.path.abspath(filename)
+        for parentdir in (possible_directories if possible_directories is not None else self.allowed_directories_for_previews()):
+            parentdir = os.path.dirname(os.path.abspath(parentdir))
+            if abspath.startswith(parentdir):
+                return os.path.relpath(abspath, parentdir)
+
+        return ""
     
     def create_item_html(self, tabname: str, item: dict, template: Optional[str] = None) -> Union[str, dict]:
         return self.instance.create_item_html(tabname, item, template)
